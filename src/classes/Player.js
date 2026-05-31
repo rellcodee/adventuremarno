@@ -7,11 +7,18 @@ export default class Player {
         this.coins = 0;
         this.score = 0;
 
+        this.isDead = false;
+        this.isHit = false;
+        this.hitTimer = 0;
+
         this.levelWidth = levelWidth;
         // 1. Mario-size scale
         this.width = 48;
         this.height = 64;
         this.x = 80;
+
+        // Inside Player.js constructor
+        this.isOnPlatform = false;
 
         this.maxReachedX = this.x;
 
@@ -24,13 +31,16 @@ export default class Player {
             stand: new Image(),
             walkA: new Image(),
             walkB: new Image(),
-            jump: new Image()
+            jump: new Image(),
+            damage: new Image(),
+            dead: new Image()
         };
         this.assets.stand.src = '../assets/player/stand.png'; // Add your stand file
         this.assets.walkA.src = '../assets/player/walkA.png';
         this.assets.walkB.src = '../assets/player/walkB.png';
         this.assets.jump.src = '../assets/player/jump.png';
-
+        this.assets.damage.src = '../assets/player/sick.png';
+        this.assets.dead.src = '../assets/player/death.png';
 
         // 3. Physics (GDD Specs)
         this.vy = 0;
@@ -46,7 +56,43 @@ export default class Player {
         this.facing = 'right'; // Track direction for the flip
     }
 
+    takeDamage() {
+        if (this.isHit || this.isDead) return; // Invulnerability frames
+
+        this.health--;
+        if (this.health <= 0) {
+            this.die();
+        } else {
+            this.isHit = true;
+            this.hitTimer = 0;
+            this.vy = -400; // Small jump when hit
+            this.speed = -150; // Optional: knockback speed
+        }
+    }
+
+    die() {
+        this.isDead = true;
+        this.vy = -600; // Death jump (classic Mario style)
+        this.currentSprite = this.assets.dead;
+    }
+
     update(input, dt) {
+
+        if (this.isDead) {
+            this.y += this.vy * dt;
+            this.vy += this.weight * dt; // Fall off screen
+            return; // Skip all other logic
+        }
+
+
+        // Handle hit stun duration
+        if (this.isHit) {
+            this.hitTimer += dt;
+            if (this.hitTimer > 0.8) { // 0.8 seconds of "sick" pose
+                this.isHit = false;
+            }
+        }
+
         // --- HORIZONTAL MOVEMENT ---
         if (input.includes('ArrowRight')) {
             this.speed = this.maxSpeed;
@@ -72,17 +118,7 @@ export default class Player {
         }
 
         // --- THE STATE CONTROLLER (Asset Swapping) ---
-        if (!this.onGround()) {
-            // Priority 1: Jumping
-            this.currentSprite = this.assets.jump;
-        } else if (this.speed !== 0) {
-            // Priority 2: Walking
-            this.animateWalk(dt);
-        } else {
-            // Priority 3: Standing
-            this.currentSprite = this.assets.stand;
-            this.frameTimer = 0; // Reset timer so walk starts fresh
-        }
+
 
         // Boundaries
         if (this.x < 0) this.x = 0;
@@ -96,21 +132,45 @@ export default class Player {
         if (!this.onGround()) {
             this.vy += this.weight * dt;
         } else {
-            this.vy = 0;
-            this.y = this.gameHeight - this.height - 100; // Snap to floor
+            // FIX: Only snap to floor if we aren't on a platform
+            if (!this.isOnPlatform) {
+                this.vy = 0;
+                const groundY = this.gameHeight - this.height - 100;
+                this.y = groundY;
+            } else {
+                // Just stop falling, let Obstacle.js handle the position
+                this.vy = 0;
+            }
         }
-
+        // --- 2. JUMP LOGIC (MUST BE LAST) ---
+        // We check onGround() here. If it's true, we set a fresh -530 velocity.
         if (input.includes('ArrowUp') && this.onGround()) {
-            this.vy = -530; // Jump force
+            this.vy = -530;
+            this.isOnPlatform = false; // "Launch" off the platform
         }
 
-        // Inside Player.js update()
-        if (this.x > this.maxReachedX) {
-            // Player moved to a "new road"
-            let distanceMoved = this.x - this.maxReachedX;
-            this.score += Math.floor(distanceMoved / 10); // 1 point per 10 pixels
-            this.maxReachedX = this.x;
+        // Force a tiny bit of "Stickiness"
+        if (this.isOnPlatform) {
+            this.vy = 0; // Lock velocity
         }
+
+        // --- THE FINAL ANIMATION CONTROLLER (DO NOT DUPLICATE) ---
+        // Priority: 1. Death, 2. Damage, 3. Air/Jump, 4. Walk, 5. Stand
+        if (this.isDead) {
+            this.currentSprite = this.assets.dead;
+        } else if (this.isHit) {
+            // This MUST come before the !onGround check
+            this.currentSprite = this.assets.damage;
+        } else if (!this.onGround()) {
+            this.currentSprite = this.assets.jump;
+        } else if (this.speed !== 0) {
+            this.animateWalk(dt);
+        } else {
+            this.currentSprite = this.assets.stand;
+            this.frameTimer = 0;
+        }
+
+
     }
 
     animateWalk(dt) {
@@ -124,7 +184,8 @@ export default class Player {
     }
 
     onGround() {
-        return this.y >= this.gameHeight - this.height - 100;
+        const isAtFloor = this.y >= (this.gameHeight - this.height - 102);
+        return isAtFloor || this.isOnPlatform;
     }
 
     draw(context) {

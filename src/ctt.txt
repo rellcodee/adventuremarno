@@ -1,0 +1,4 @@
+walk on obstacle
+behavior all enemies
+give obstacle and enemy in every level
+animate die
